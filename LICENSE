@@ -1,0 +1,18 @@
+MIXED / NON-COMMERCIAL PROPRIETARY LICENSE
+
+This repository (S3-MSX-PC) is a combined work containing code from different authors with distinct licensing terms. As a whole, this project is strictly for NON-COMMERCIAL, PERSONAL AND EDUCATIONAL USE ONLY.
+
+1. fMSX CORE (PROPRIETARY)
+Copyright (C) Marat Fayzullin 1994-2021
+The core fMSX emulation engine is NOT open-source software in the OSI sense. You are NOT allowed to distribute this software commercially. Any commercial use requires explicit written permission from the original author, Marat Fayzullin.
+
+2. RETRO-GO FRAMEWORK (GPL-3.0)
+Copyright (C) ducalex
+The underlying OS/hardware abstraction framework (retro-go) is distributed under the GNU General Public License v3.0.
+
+3. S3-MSX-PC ADAPTATIONS AND CUSTOM DRIVERS
+Copyright (C) Ivan Svarkovsky 2026
+All specific adaptations, Z80 Computed Goto implementations, VGA R-2R rendering pipelines, and the Delta-Stride LZ compressor written for this project are provided to the community for personal, non-commercial educational use.
+
+IMPORTANT NOTE ON LICENSING:
+Because this project statically links and integrates with the proprietary fMSX core, the entire combined software distribution inherits the non-commercial restriction. This creates a technical licensing conflict with the GPL-3.0 retro-go framework. This repository is published as a "Source Available" hobby project for educational purposes and preservation of computing history. YOU MAY NOT SELL, MONETIZE, OR COMMERCIALLY DISTRIBUTE THIS WORK.

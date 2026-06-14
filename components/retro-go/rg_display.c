@@ -1,0 +1,467 @@
+// test
+
+#include "rg_system.h"
+#include "rg_display.h"
+
+#include <stdlib.h>
+#include <string.h>
+
+#define LCD_BUFFER_LENGTH (RG_SCREEN_WIDTH * 4) // 4 
+
+static rg_task_t *display_task_queue;
+static rg_display_counters_t counters;
+static rg_display_config_t config;
+static rg_surface_t *border;
+static rg_display_t display;
+static int16_t map_viewport_to_source_x[RG_SCREEN_WIDTH + 1];
+static int16_t map_viewport_to_source_y[RG_SCREEN_HEIGHT + 1];
+static uint32_t screen_line_checksum[RG_SCREEN_HEIGHT + 1];
+
+#define LINE_IS_REPEATED(Y) (map_viewport_to_source_y[(Y)] == map_viewport_to_source_y[(Y) - 1])
+#define FLOAT_TO_INT(x) ((int)((x) + 0.1f))
+
+static const char *SETTING_BACKLIGHT = "DispBacklight";
+static const char *SETTING_SCALING = "DispScaling";
+static const char *SETTING_FILTER = "DispFilter";
+static const char *SETTING_ROTATION = "DispRotation";
+static const char *SETTING_BORDER = "DispBorder";
+static const char *SETTING_CUSTOM_ZOOM = "DispCustomZoom";
+
+static void lcd_init(void);
+static void lcd_deinit(void);
+static void lcd_sync(void);
+static void lcd_set_rotation(int rotation);
+static void lcd_set_backlight(float percent);
+static void lcd_set_window(int left, int top, int width, int height);
+static inline uint16_t *lcd_get_buffer(size_t length);
+static inline void lcd_send_buffer(uint16_t *buffer, size_t length);
+
+#include "drivers/display/vga.h"
+
+static int draw_on_screen_display(int region_start, int region_end)
+{
+    static unsigned int area_dirty = 0;
+    rg_margins_t margins = rg_gui_get_safe_area();
+    int left = display.screen.width - margins.right - 28;
+    int top = margins.top + 4;
+    int border = 3;
+    int width = 20;
+    int height = 14;
+
+    if (region_end < top + height)
+        return top + height;
+
+    if (rg_system_get_indicator(RG_INDICATOR_POWER_LOW) && ((counters.totalFrames / 20) & 1))
+    {
+        rg_display_clear_rect(left, top, width, height, C_RED);
+        rg_display_clear_rect(left + width, top + height / 4, border, height / 2, C_RED);
+        rg_display_clear_rect(left + border, top + border, width - border * 2, height - border * 2, C_BLACK);
+        area_dirty |= (1 << RG_INDICATOR_POWER_LOW);
+    }
+    else if (area_dirty)
+    {
+        if (display.viewport.width < display.screen.width || display.viewport.height < display.screen.height)
+            rg_display_clear_rect(left, top, width + border, height, C_BLACK);
+        memset(&screen_line_checksum[top], 0, sizeof(uint32_t) * height);
+        area_dirty = 0;
+    }
+    return 0;
+}
+
+static inline unsigned blend_pixels(unsigned a, unsigned b)
+{
+    if (a == b) return a;
+    a = (a << 8) | (a >> 8);
+    b = (b << 8) | (b >> 8);
+    unsigned s = a ^ b;
+    unsigned v = ((s & 0xF7DEU) >> 1) + (a & b) + (s & 0x0821U);
+    return (v << 8) | (v >> 8);
+}
+
+static inline void write_update(const rg_surface_t *update)
+{
+    const int64_t time_start = rg_system_timer();
+
+    bool filter_x = display.viewport.filter_x;
+    bool filter_y = display.viewport.filter_y;
+    int draw_left = display.viewport.left;
+    int draw_top = display.viewport.top;
+    int draw_width = display.viewport.width;
+    int draw_height = display.viewport.height;
+
+    int crop_left = 0, crop_top = 0;
+
+    if (draw_left < 0) {
+        crop_left += -draw_left * display.viewport.step_x;
+        draw_width += draw_left * 2;
+        draw_left = 0;
+    }
+    if (draw_top < 0) {
+        crop_top += -draw_top * display.viewport.step_y;
+        draw_height += draw_top * 2;
+        draw_top = 0;
+    }
+
+    const int format = update->format;
+    const int stride = update->stride;
+    const void *data = update->data + update->offset + (crop_top * stride) + (crop_left * RG_PIXEL_GET_SIZE(format));
+    const uint16_t *palette = update->palette;
+
+    const bool partial_update = RG_SCREEN_PARTIAL_UPDATES;
+    int lines_per_buffer = LCD_BUFFER_LENGTH / draw_width;
+    int lines_remaining = draw_height;
+    int lines_updated = 0;
+    int window_top = -1;
+    int osd_next_call = 20;
+
+    for (int y = 0; y < draw_height;)
+    {
+        int lines_to_copy = RG_MIN(lines_per_buffer, lines_remaining);
+        if (lines_to_copy < 1) break;
+
+        if (filter_y) {
+            while (lines_to_copy > 1 && (LINE_IS_REPEATED(y + lines_to_copy - 1) || LINE_IS_REPEATED(y + lines_to_copy)))
+                --lines_to_copy;
+        }
+
+        uint16_t *line_buffer = lcd_get_buffer(LCD_BUFFER_LENGTH);
+        uint16_t *line_buffer_ptr = line_buffer;
+        uint32_t checksum = 0xFFFFFFFF;
+        bool need_update = !partial_update;
+
+        for (int i = 0; i < lines_to_copy; ++i)
+        {
+            if (i > 0 && LINE_IS_REPEATED(y))
+            {
+                memcpy(line_buffer_ptr, line_buffer_ptr - draw_width, draw_width * 2);
+                line_buffer_ptr += draw_width;
+            }
+            else
+            {
+                // Стандартный, стабильный рендеринг Retro-Go 
+                if (format == RG_PIXEL_565_BE && !filter_x) 
+                {
+                    uint16_t *src_line = (uint16_t *)(data + map_viewport_to_source_y[y] * stride);
+                    for (int xx = 0; xx < draw_width; ++xx) {
+                        *line_buffer_ptr++ = src_line[map_viewport_to_source_x[xx]];
+                    }
+                } 
+                else 
+                {
+                    if (format & RG_PIXEL_PALETTE) {
+                        uint8_t *buffer = (uint8_t *)(data + map_viewport_to_source_y[y] * stride);
+                        for (int xx = 0; xx < draw_width; ++xx)
+                            *line_buffer_ptr++ = palette[buffer[map_viewport_to_source_x[xx]]];
+                    } else if (format == RG_PIXEL_565_LE) {
+                        uint16_t *buffer = (uint16_t *)(data + map_viewport_to_source_y[y] * stride);
+                        for (int xx = 0; xx < draw_width; ++xx) {
+                            int x = map_viewport_to_source_x[xx];
+                            *line_buffer_ptr++ = (buffer[x] << 8) | (buffer[x] >> 8);
+                        }
+                    } else {
+                        uint16_t *buffer = (uint16_t *)(data + map_viewport_to_source_y[y] * stride);
+                        for (int xx = 0; xx < draw_width; ++xx)
+                            *line_buffer_ptr++ = buffer[map_viewport_to_source_x[xx]];
+                    }
+                }
+
+                if (partial_update) checksum = rg_hash((void*)(line_buffer_ptr - draw_width), draw_width * 2);
+            }
+
+            if (screen_line_checksum[draw_top + y] != checksum) {
+                screen_line_checksum[draw_top + y] = checksum;
+                need_update = true;
+            }
+            ++y;
+        }
+
+        if (filter_x && need_update) {
+            for (int i = 0; i < lines_to_copy; ++i) {
+                uint16_t *buffer = line_buffer + i * draw_width;
+                for (int x = 1; x < draw_width - 1; ++x) {
+                    if (map_viewport_to_source_x[x] == map_viewport_to_source_x[x - 1])
+                        buffer[x] = blend_pixels(buffer[x - 1], buffer[x + 1]);
+                }
+            }
+        }
+
+        if (filter_y && need_update) {
+            int top = y - lines_to_copy;
+            for (int i = 1; i < lines_to_copy - 1; ++i) {
+                if (LINE_IS_REPEATED(top + i)) {
+                    uint16_t *lineA = line_buffer + (i - 1) * draw_width;
+                    uint16_t *lineB = line_buffer + (i + 0) * draw_width;
+                    uint16_t *lineC = line_buffer + (i + 1) * draw_width;
+                    for (size_t x = 0; x < draw_width; ++x)
+                        lineB[x] = blend_pixels(lineA[x], lineC[x]);
+                }
+            }
+        }
+
+        if (need_update) {
+            int left = display.screen.margins.left + draw_left;
+            int top = display.screen.margins.top + draw_top + y - lines_to_copy;
+            if (top != window_top)
+                lcd_set_window(left, top, draw_width, lines_remaining);
+            lcd_send_buffer(line_buffer, draw_width * lines_to_copy);
+            window_top = top + lines_to_copy;
+            lines_updated += lines_to_copy;
+        } else {
+            lcd_send_buffer(line_buffer, 0);
+        }
+
+        if (osd_next_call && draw_top + y >= osd_next_call) {
+            osd_next_call = draw_on_screen_display(0, draw_top + y);
+            window_top = -1;
+        }
+        lines_remaining -= lines_to_copy;
+    }
+
+    if (lines_updated > draw_height * 0.80f) counters.fullFrames++;
+    else counters.partFrames++;
+    counters.busyTime += rg_system_timer() - time_start;
+}
+
+static void update_viewport_scaling(void)
+{
+    int screen_width = display.screen.width;
+    int screen_height = display.screen.height;
+    int src_width = display.source.width;
+    int src_height = display.source.height;
+    int new_width = src_width;
+    int new_height = src_height;
+
+    if (config.scaling == RG_DISPLAY_SCALING_FULL)
+    {
+        new_width = screen_width;
+        new_height = screen_height;
+    }
+    else if (config.scaling == RG_DISPLAY_SCALING_FIT)
+    {
+        new_width = FLOAT_TO_INT(screen_height * ((float)src_width / src_height));
+        new_height = screen_height;
+        if (new_width > screen_width) {
+            new_width = screen_width;
+            new_height = FLOAT_TO_INT(screen_width * ((float)src_height / src_width));
+        }
+    }
+    else if (config.scaling == RG_DISPLAY_SCALING_ZOOM)
+    {
+        new_width = FLOAT_TO_INT(src_width * config.custom_zoom);
+        new_height = FLOAT_TO_INT(src_height * config.custom_zoom);
+    }
+
+    new_width &= ~1;
+    new_height &= ~1;
+
+    display.viewport.left = (screen_width - new_width) / 2;
+    display.viewport.top = (screen_height - new_height) / 2;
+    display.viewport.width = new_width;
+    display.viewport.height = new_height;
+
+    display.viewport.step_x = (float)src_width / display.viewport.width;
+    display.viewport.step_y = (float)src_height / display.viewport.height;
+
+    // Выключаем билинейный фильтр для MSX игр
+    if (src_width == 256 || src_width == 512) {
+        display.viewport.filter_x = false;
+        display.viewport.filter_y = false;
+    } else {
+        display.viewport.filter_x = (config.filter == RG_DISPLAY_FILTER_HORIZ || config.filter == RG_DISPLAY_FILTER_BOTH) &&
+                                    (config.scaling && (display.viewport.width % src_width) != 0);
+        display.viewport.filter_y = (config.filter == RG_DISPLAY_FILTER_VERT || config.filter == RG_DISPLAY_FILTER_BOTH) &&
+                                    (config.scaling && (display.viewport.height % src_height) != 0);
+    }
+
+    memset(screen_line_checksum, 0, sizeof(screen_line_checksum));
+
+    for (int x = 0; x < screen_width; ++x) map_viewport_to_source_x[x] = FLOAT_TO_INT(x * display.viewport.step_x);
+    for (int y = 0; y < screen_height; ++y) map_viewport_to_source_y[y] = FLOAT_TO_INT(y * display.viewport.step_y);
+}
+
+static bool load_border_file(const char *filename)
+{
+    free(border); border = NULL;
+    display.changed = true;
+    if (filename && (border = rg_surface_load_image_file(filename, 0))) {
+        if (border->width != rg_display_get_width() || border->height != rg_display_get_height()) {
+            rg_surface_t *resized = rg_surface_resize(border, rg_display_get_width(), rg_display_get_height());
+            if (resized) { rg_surface_free(border); border = resized; }
+        }
+        return true;
+    }
+    return false;
+}
+
+IRAM_ATTR static void display_task(void *arg)
+{
+    rg_task_msg_t msg;
+    while (rg_task_peek(&msg)) {
+        if (msg.type == RG_TASK_MSG_STOP) break;
+        if (display.changed) {
+            update_viewport_scaling();
+            if (display.viewport.width < display.screen.width || display.viewport.height < display.screen.height) {
+                if (border) rg_display_write_rect(0, 0, border->width, border->height, 0, border->data, RG_DISPLAY_WRITE_NOSYNC);
+                else rg_display_clear_except(display.viewport.left, display.viewport.top, display.viewport.width, display.viewport.height, C_BLACK);
+            }
+            display.changed = false;
+        }
+        write_update(msg.dataPtr);
+        rg_task_receive(&msg);
+        lcd_sync();
+    }
+}
+
+void rg_display_force_redraw(void) { display.changed = true; rg_system_event(RG_EVENT_REDRAW, NULL); rg_display_sync(true); }
+const rg_display_t *rg_display_get_info(void) { return &display; }
+rg_display_counters_t rg_display_get_counters(void) { return counters; }
+int rg_display_get_width(void) { return display.screen.width; }
+int rg_display_get_height(void) { return display.screen.height; }
+void rg_display_set_scaling(display_scaling_t scaling) { config.scaling = RG_MIN(RG_MAX(0, scaling), RG_DISPLAY_SCALING_COUNT - 1); rg_settings_set_number(NS_APP, SETTING_SCALING, config.scaling); display.changed = true; }
+display_scaling_t rg_display_get_scaling(void) { return config.scaling; }
+void rg_display_set_custom_zoom(double factor) { config.custom_zoom = RG_MIN(RG_MAX(0.1, factor), 2.0); rg_settings_set_number(NS_APP, SETTING_CUSTOM_ZOOM, config.custom_zoom); display.changed = true; }
+double rg_display_get_custom_zoom(void) { return config.custom_zoom; }
+void rg_display_set_filter(display_filter_t filter) { config.filter = RG_MIN(RG_MAX(0, filter), RG_DISPLAY_FILTER_COUNT - 1); rg_settings_set_number(NS_APP, SETTING_FILTER, config.filter); display.changed = true; }
+display_filter_t rg_display_get_filter(void) { return config.filter; }
+void rg_display_set_rotation(display_rotation_t rotation) { config.rotation = RG_MIN(RG_MAX(0, rotation), RG_DISPLAY_ROTATION_COUNT - 1); rg_settings_set_number(NS_APP, SETTING_SCALING, config.rotation); display.changed = true; }
+display_rotation_t rg_display_get_rotation(void) { return config.rotation; }
+void rg_display_set_backlight(display_backlight_t percent) { config.backlight = RG_MIN(RG_MAX(percent, RG_DISPLAY_BACKLIGHT_MIN), RG_DISPLAY_BACKLIGHT_MAX); rg_settings_set_number(NS_GLOBAL, SETTING_BACKLIGHT, config.backlight); lcd_set_backlight(config.backlight); }
+display_backlight_t rg_display_get_backlight(void) { return config.backlight; }
+void rg_display_set_border(const char *filename) { free(config.border_file); config.border_file = NULL; if (load_border_file(filename)) { rg_settings_set_string(NS_APP, SETTING_BORDER, filename); config.border_file = strdup(filename); } else { rg_settings_set_string(NS_APP, SETTING_BORDER, NULL); } display.changed = true; }
+char *rg_display_get_border(void) { return rg_settings_get_string(NS_APP, SETTING_BORDER, NULL); }
+
+void rg_display_submit(const rg_surface_t *update, uint32_t flags)
+{
+    const int64_t time_start = rg_system_timer();
+    if (!update || !update->data) return;
+    if (display.source.width != update->width || display.source.height != update->height) {
+        rg_display_sync(true);
+        display.source.width = update->width;
+        display.source.height = update->height;
+        display.changed = true;
+    }
+    rg_task_send(display_task_queue, &(rg_task_msg_t){.dataPtr = update});
+    counters.blockTime += rg_system_timer() - time_start;
+    counters.totalFrames++;
+}
+
+bool rg_display_sync(bool block)
+{
+    while (block && rg_task_messages_waiting(display_task_queue)) continue;
+    return !rg_task_messages_waiting(display_task_queue);
+}
+
+void rg_display_write_rect(int left, int top, int width, int height, int stride, const uint16_t *buffer, uint32_t flags)
+{
+    RG_ASSERT_ARG(buffer);
+    stride = RG_MAX(stride, width * 2);
+    width = RG_MIN(width, display.screen.width - left);
+    height = RG_MIN(height, display.screen.height - top);
+    if (width < 0 || height < 0) return;
+    if (!(flags & RG_DISPLAY_WRITE_NOSYNC)) rg_display_sync(true);
+    for (size_t y = 0; y < height; ++y) screen_line_checksum[top + y] = 0;
+    lcd_set_window(left + display.screen.margins.left, top + display.screen.margins.top, width, height);
+    for (size_t y = 0; y < height;) {
+        uint16_t *lcd_buffer = lcd_get_buffer(LCD_BUFFER_LENGTH);
+        size_t num_lines = RG_MIN(LCD_BUFFER_LENGTH / width, height - y);
+        for (size_t line = 0; line < num_lines; ++line) {
+            uint16_t *src = (void *)buffer + ((y + line) * stride);
+            uint16_t *dst = lcd_buffer + (line * width);
+            if (flags & RG_DISPLAY_WRITE_NOSWAP) memcpy(dst, src, width * 2);
+            else for (size_t i = 0; i < width; ++i) dst[i] = (src[i] >> 8) | (src[i] << 8);
+        }
+        lcd_send_buffer(lcd_buffer, width * num_lines);
+        y += num_lines;
+    }
+    lcd_sync();
+}
+
+void rg_display_clear_rect(int left, int top, int width, int height, uint16_t color_le)
+{
+    const uint16_t color_be = (color_le << 8) | (color_le >> 8);
+    int pixels_remaining = width * height;
+    if (pixels_remaining > 0) {
+        lcd_set_window(left + display.screen.margins.left, top + display.screen.margins.top, width, height);
+        while (pixels_remaining > 0) {
+            uint16_t *buffer = lcd_get_buffer(LCD_BUFFER_LENGTH);
+            int pixels = RG_MIN(pixels_remaining, LCD_BUFFER_LENGTH);
+            for (size_t j = 0; j < pixels; ++j) buffer[j] = color_be;
+            lcd_send_buffer(buffer, pixels);
+            pixels_remaining -= pixels;
+        }
+    }
+}
+
+void rg_display_clear_except(int left, int top, int width, int height, uint16_t color_le)
+{
+    int left_offset = -display.screen.margins.left;
+    int top_offset = -display.screen.margins.top;
+    int horiz = (display.screen.real_width - width + 1) / 2;
+    int vert = (display.screen.real_height - height + 1) / 2;
+    rg_display_clear_rect(left_offset, top_offset, horiz, display.screen.real_height, color_le);
+    rg_display_clear_rect(left_offset + horiz + width, top_offset, horiz, display.screen.real_height, color_le);
+    rg_display_clear_rect(left_offset + horiz, top_offset, display.screen.real_width - horiz * 2, vert, color_le);
+    rg_display_clear_rect(left_offset + horiz, top_offset + vert + height, display.screen.real_width - horiz * 2, vert, color_le);
+}
+
+void rg_display_clear(uint16_t color_le)
+{
+    rg_display_clear_rect(-display.screen.margins.left, -display.screen.margins.top, display.screen.real_width, display.screen.real_height, color_le);
+}
+
+void rg_display_deinit(void)
+{
+    if (shared_framebuffer) { memset(shared_framebuffer, 0, RG_SCREEN_WIDTH * RG_SCREEN_HEIGHT * 2); }
+    rg_task_send(display_task_queue, &(rg_task_msg_t){.type = RG_TASK_MSG_STOP});
+    lcd_deinit();
+    if (border) { rg_surface_free(border); border = NULL; }
+    if (config.border_file) { free(config.border_file); config.border_file = NULL; }
+    RG_LOGI("Display terminated.\n");
+}
+
+void rg_display_init(void)
+{
+    RG_LOGI("Initialization...\n");
+    
+    // Читаем сохраненные настройки из JSON-файла конкретного приложения, 
+    // а не перезаписываем их принудительно. По умолчанию ставим 1:1 (OFF)
+    config = (rg_display_config_t){
+        .backlight = rg_settings_get_number(NS_GLOBAL, SETTING_BACKLIGHT, 100),
+        .scaling = rg_settings_get_number(NS_APP, SETTING_SCALING, RG_DISPLAY_SCALING_OFF),
+        .filter = rg_settings_get_number(NS_APP, SETTING_FILTER, RG_DISPLAY_FILTER_OFF),
+        .rotation = rg_settings_get_number(NS_APP, SETTING_ROTATION, RG_DISPLAY_ROTATION_OFF),
+        .border_file = rg_settings_get_string(NS_APP, SETTING_BORDER, NULL),
+        .custom_zoom = rg_settings_get_number(NS_APP, SETTING_CUSTOM_ZOOM, 1.0),
+    };
+    
+    display = (rg_display_t){
+        .screen.real_width = RG_SCREEN_WIDTH,
+        .screen.real_height = RG_SCREEN_HEIGHT,
+        .screen.width = RG_SCREEN_WIDTH,
+        .screen.height = RG_SCREEN_HEIGHT,
+        .screen.margins = RG_SCREEN_VISIBLE_AREA,
+        .changed = true,
+    };
+    display.screen.width -= display.screen.margins.left + display.screen.margins.right;
+    display.screen.height -= display.screen.margins.top + display.screen.margins.bottom;
+    lcd_init();
+    rg_display_clear(C_BLACK);
+    rg_task_delay(80);
+    lcd_set_backlight(config.backlight);
+    display_task_queue = rg_task_create("rg_display", &display_task, NULL, 4 * 1024, RG_TASK_PRIORITY_6, 1);
+    if (config.border_file)
+        load_border_file(config.border_file);
+        
+    RG_LOGI("Display ready. (VGA 640x480@60Hz)\n");
+}
+
+void *rg_display_get_framebuffer(void)
+{
+    return shared_framebuffer;
+}
+
+bool rg_display_is_initialized(void)
+{
+    extern bool framebuffer_initialized;
+    return framebuffer_initialized;
+}
