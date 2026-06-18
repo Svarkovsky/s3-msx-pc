@@ -1,0 +1,2 @@
+dependencies:
+  espressif/usb_host_hid: "==1.2.0"
