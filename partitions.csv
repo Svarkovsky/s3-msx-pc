@@ -1,0 +1,2 @@
+# This table isn't used, it's just needed to avoid esp-idf build failures.
+dummy, app, ota_0, 65536, 3145728
