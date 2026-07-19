@@ -1,0 +1,6 @@
+nvs,      data, nvs,     0x9000,   0x4000,
+otadata,  data, ota,     0xD000,   0x2000,
+phy_init, data, phy,     0xF000,   0x1000,
+launcher, app,  factory, 0x10000,  0xD0000,
+fmsx,     app,  ota_0,   0xE0000,  0xB0000,
+storage,  data, fat,     0x190000, 0xE70000,

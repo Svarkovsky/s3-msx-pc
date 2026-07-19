@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 800 42" width="100%" height="42" style="image-rendering: pixelated;">
+  <g>
+    <animateTransform attributeName="transform" 
+                      type="translate" 
+                      from="-32 0" to="832 0" 
+                      dur="15s" 
+                      repeatCount="indefinite" />
+                      
+    <g transform="translate(32, 0) scale(-1, 1)">
+      <svg x="0" y="0" width="32" height="42" viewBox="0 0 16 21">
+        <image xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPAAAAAVCAMAAABPApORAAAAHlBMVEUAAAAGBgYg9/f32LD39/dokNjYkAbYBgb39waQAADXyMqkAAAAAXRSTlMAQObYZgAAAtdJREFUeNrVlQd2xTgMAzUQXfb+B04TPx8f1om2F6bCY4kGKCfjmwIYg7Hj/9dyA0REwMWe/w/r2eBxRLDnv62ozP7tcgN2hd/C98UJK7O0D27f4nEOf49lekcINtz0D+9LxHGA238sAhSixx2CsQ9gz92AdQw6fuZdP46IT3RA0Wb/MS8ikCRKq0sPwMp5jOG/mYHWMeiY45EPgKV9v9fjEpxUt2Vf/DTRL48UB3gKwCe64enZDXjHwjgnf4+mbUTkgEnHEAQnEthEm+Ee4Po97/cAfKJbbgZSzuyI4QdOxAGlfT8CfRkWJ1+3k/aF+KE9pEaitAfgE91yN1B6Tkht2DgBTfsCJLRco8lo9u12b58zQiw9l/YAfKLOw/izwdbBsHMCTXuivgAkEYCYk/FL2T9h1375I/V8CsAmuuVPBmGuAn6FnRNM6PcTfQECCUkAFwTkG6v5Xb6rMgEowx6AT7z4hPnM3cDKm1TJO3ZOwHXScBz0BYgsIQaqC3Ni+6fOknrA6dcDsIluuBkorQwkdcfOCcan49R5IResI6i8XXXEV8FF+asjDcR93yczGyJRA/cAfOLOfeLdQCbKhfIQFu95O+fr2klq4gD1FZS/9A9JRfNHW895nuQBQC0xPACf6JaXAUmIzx45BUAkZ6IcoPEs0JTqDc6ZJSf9Y39CJNIfZxsozMl1ATWOvFtMPIDylw53PA3c0N+qwU2diQTlz3mlCGlYXOeVm3WLJfIb3V/dPphqb8gE4L4B0nAFINJf+pH2vP9rBqgLzSEtMOepVgfySFYtWhbT4XoM8wdQ3UIS9cpUYCnIALq/crjhq0P67U/R/OUmhZ0v9NqP6LoML6OvQqVyvT8OSBbYwjbB36urIyB7ihT1K4LhvK/PEUfXifPW7fLSrRvA6/tgHc4x1P76Qn6b7HhtWRvnhRTe0XnKzsE1uF/3jnfPbzXg/JEQepteW/4OEGAUbugWt8gAAAAASUVORK5CYII=" 
+               href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPAAAAAVCAMAAABPApORAAAAHlBMVEUAAAAGBgYg9/f32LD39/dokNjYkAbYBgb39waQAADXyMqkAAAAAXRSTlMAQObYZgAAAtdJREFUeNrVlQd2xTgMAzUQXfb+B04TPx8f1om2F6bCY4kGKCfjmwIYg7Hj/9dyA0REwMWe/w/r2eBxRLDnv62ozP7tcgN2hd/C98UJK7O0D27f4nEOf49lekcINtz0D+9LxHGA238sAhSixx2CsQ9gz92AdQw6fuZdP46IT3RA0Wb/MS8ikCRKq0sPwMp5jOG/mYHWMeiY45EPgKV9v9fjEpxUt2Vf/DTRL48UB3gKwCe64enZDXjHwjgnf4+mbUTkgEnHEAQnEthEm+Ee4Po97/cAfKJbbgZSzuyI4QdOxAGlfT8CfRkWJ1+3k/aF+KE9pEaitAfgE91yN1B6Tkht2DgBTfsCJLRco8lo9u12b58zQiw9l/YAfKLOw/izwdbBsHMCTXuivgAkEYCYk/FL2T9h1375I/V8CsAmuuVPBmGuAn6FnRNM6PcTfQECCUkAFwTkG6v5Xb6rMgEowx6AT7z4hPnM3cDKm1TJO3ZOwHXScBz0BYgsIQaqC3Ni+6fOknrA6dcDsIluuBkorQwkdcfOCcan49R5IResI6i8XXXEV8FF+asjDcR93yczGyJRA/cAfOLOfeLdQCbKhfIQFu95O+fr2klq4gD1FZS/9A9JRfNHW895nuQBQC0xPACf6JaXAUmIzx45BUAkZ6IcoPEs0JTqDc6ZJSf9Y39CJNIfZxsozMl1ATWOvFtMPIDylw53PA3c0N+qwU2diQTlz3mlCGlYXOeVm3WLJfIb3V/dPphqb8gE4L4B0nAFINJf+pH2vP9rBqgLzSEtMOepVgfySFYtWhbT4XoM8wdQ3UIS9cpUYCnIALq/crjhq0P67U/R/OUmhZ0v9NqP6LoML6OvQqVyvT8OSBbYwjbB36urIyB7ihT1K4LhvK/PEUfXifPW7fLSrRvA6/tgHc4x1P76Qn6b7HhtWRvnhRTe0XnKzsE1uF/3jnfPbzXg/JEQepteW/4OEGAUbugWt8gAAAAASUVORK5CYII=" 
+               width="240" height="21" x="0" y="0">
+          <animate attributeName="x" 
+                   values="0;-16;-32;-48" 
+                   dur="0.6s" 
+                   repeatCount="indefinite" 
+                   calcMode="discrete" />
+        </image>
+      </svg>
+    </g>
+  </g>
+</svg>
